@@ -33,13 +33,14 @@ except ImportError:
             return ""
     Fore = Style = _Noop()  # type: ignore[assignment]
 
-C_SUCCESS  = Fore.GREEN
-C_FAIL     = Fore.RED
-C_WARN     = Fore.YELLOW
-C_INFO     = Fore.CYAN
-C_PROGRESS = Fore.BLUE
-C_HEADER   = Fore.MAGENTA
-C_RESET    = Style.RESET_ALL
+C_SUCCESS   = Fore.GREEN
+C_FAIL      = Fore.RED
+C_WARN      = Fore.YELLOW
+C_INFO      = Fore.CYAN
+C_PROGRESS  = Fore.BLUE
+C_HEADER    = Fore.MAGENTA
+C_NOCHANGE  = Fore.WHITE
+C_RESET     = Style.RESET_ALL
 
 # ── Output helpers ────────────────────────────────────────────────────────────
 
@@ -417,36 +418,55 @@ def backup_file(txt_path: pathlib.Path) -> pathlib.Path:
 # ── File writer ───────────────────────────────────────────────────────────────
 
 def write_keywords(txt_path: pathlib.Path, keywords: list[str],
-                   action: str) -> pathlib.Path | None:
-    """Write keywords to file. Returns backup path if a backup was made."""
-    backup_path: pathlib.Path | None = None
+                   action: str) -> tuple[pathlib.Path | None, bool]:
+    """Write keywords to file.
 
+    Returns (backup_path, changed):
+        backup_path  – path to the backup copy if one was made, else None
+        changed      – False when the final keyword list is identical to the
+                       existing file content (no write or backup performed)
+    """
     if action == "overwrite":
+        new_content = ", ".join(keywords) + "\n"
         if txt_path.exists():
+            existing_content = txt_path.read_text(encoding="utf-8")
+            if new_content == existing_content:
+                return None, False
             backup_path = backup_file(txt_path)
-        txt_path.write_text(", ".join(keywords) + "\n", encoding="utf-8")
+        else:
+            backup_path = None
+        txt_path.write_text(new_content, encoding="utf-8")
+        return backup_path, True
 
     elif action == "append":
-        backup_path = backup_file(txt_path)
-        existing_raw = txt_path.read_text(encoding="utf-8").strip()
-        existing = (
-            [kw.strip().lower() for kw in existing_raw.split(",") if kw.strip()]
-            if existing_raw else []
-        )
+        existing_content = txt_path.read_text(encoding="utf-8")
+        existing = [
+            kw.strip().lower()
+            for kw in existing_content.strip().split(",")
+            if kw.strip()
+        ]
         merged = list(dict.fromkeys(existing + [kw.lower() for kw in keywords]))
-        txt_path.write_text(", ".join(merged) + "\n", encoding="utf-8")
+        new_content = ", ".join(merged) + "\n"
+        if new_content == existing_content:
+            return None, False
+        backup_path = backup_file(txt_path)
+        txt_path.write_text(new_content, encoding="utf-8")
+        return backup_path, True
 
-    return backup_path
+    return None, False
 
 # ── Per-file result printer ───────────────────────────────────────────────────
 
 def print_result(filename: str, keyword_count: int, *, success: bool,
-                 skipped: bool = False, reason: str = "") -> None:
+                 skipped: bool = False, no_change: bool = False,
+                 reason: str = "") -> None:
     sys.stdout.write("\n")
     name = f"{filename:<38}"
     count = f"{keyword_count:>3} keywords"
     if skipped:
         print(f"  {C_WARN}{name}  {count}  SKIPPED{C_RESET}")
+    elif no_change:
+        print(f"  {C_NOCHANGE}{name}  {count}  NO CHANGE{C_RESET}")
     elif success:
         print(f"  {C_SUCCESS}{name}  {count}  SUCCESS{C_RESET}")
     else:
@@ -463,6 +483,10 @@ def print_summary(stats: dict[str, Any]) -> None:
     print_header(bar)
     print_info(f"  Total files    : {stats['total']}")
     print_info(f"  Processed      : {stats['processed']}")
+    if stats["no_change"] > 0:
+        print(f"{C_NOCHANGE}  No change      : {stats['no_change']}{C_RESET}")
+    else:
+        print_info(f"  No change      : {stats['no_change']}")
     print_info(f"  Skipped        : {stats['skipped']}")
     failed = stats["failed"]
     if failed > 0:
@@ -571,6 +595,7 @@ def main() -> None:
     stats: dict[str, Any] = {
         "total": total,
         "processed": 0,
+        "no_change": 0,
         "skipped": 0,
         "failed": 0,
         "keywords": 0,
@@ -610,10 +635,15 @@ def main() -> None:
                 continue
 
             try:
-                backup_path = write_keywords(txt_path, keywords, action)
+                backup_path, changed = write_keywords(txt_path, keywords, action)
             except OSError as exc:
                 print_result(img_path.name, 0, success=False, reason=str(exc))
                 stats["failed"] += 1
+                continue
+
+            if not changed:
+                print_result(img_path.name, len(keywords), success=True, no_change=True)
+                stats["no_change"] += 1
                 continue
 
             if backup_path is not None:
