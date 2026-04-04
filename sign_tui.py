@@ -220,85 +220,13 @@ class ErrorModal(ModalScreen):
 class MainScreen(Screen):
     """Main analysis screen with progress, results, and summary."""
 
-    CSS = """
-    #main-layout {
-        height: 1fr;
-        padding: 1 2;
-    }
-
-    #mode-panel {
-        height: auto;
-        margin-bottom: 1;
-    }
-
-    #mode-panel Static {
-        width: 1fr;
-    }
-
-    #file-info {
-        height: auto;
-        margin-bottom: 1;
-    }
-
-    #global-action {
-        display: none;
-        height: 1;
-        color: $warning;
-        margin-bottom: 1;
-    }
-
-    #progress {
-        display: none;
-        margin-bottom: 1;
-    }
-
-    #current-file {
-        display: none;
-        height: 1;
-        color: $text-muted;
-        margin-bottom: 1;
-    }
-
-    #result-log {
-        height: 1fr;
-        border: solid $surface;
-        margin-bottom: 1;
-    }
-
-    #summary-panel {
-        display: none;
-        height: auto;
-        border: solid $primary;
-        padding: 1 2;
-    }
-
-    #confirm-container,
-    #conflict-container,
-    #error-container {
-        width: 60;
-        height: auto;
-        background: $surface;
-        border: solid $primary;
-        padding: 2 3;
-        margin: auto;
-    }
-
-    #conflict-buttons {
-        height: auto;
-        margin-top: 1;
-    }
-
-    #conflict-buttons Button {
-        margin: 0 1;
-    }
-    """
-
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit"),
         Binding("q", "quit", "Quit"),
     ]
 
     def compose(self) -> ComposeResult:
+        logger.info("MainScreen.compose() called")
         yield Header(show_clock=True)
         yield Vertical(
             Horizontal(
@@ -328,7 +256,13 @@ class MainScreen(Screen):
 
     def on_mount(self) -> None:
         """Initialize and show confirmation prompt."""
-        self.app.call_after_refresh(self._init_and_confirm)
+        logger.info("MainScreen.on_mount() called")
+        try:
+            self.app.call_after_refresh(self._init_and_confirm)
+            logger.info("Scheduled _init_and_confirm")
+        except Exception as e:
+            logger.exception("Error in MainScreen.on_mount")
+            raise
 
     def _init_and_confirm(self) -> None:
         """Load config, find files, show confirmation."""
@@ -729,10 +663,15 @@ class SignApp(App):
 
     def on_mount(self) -> None:
         """Initialize app state."""
+        logger.info("SignApp.on_mount() called")
         try:
+            logger.info("Creating threading event")
             self._conflict_event = threading.Event()
-            self.push_screen(MainScreen())
-            logger.info("Main screen pushed")
+            logger.info("Creating MainScreen")
+            screen = MainScreen()
+            logger.info("Pushing MainScreen")
+            self.push_screen(screen)
+            logger.info("Main screen pushed successfully")
         except Exception as e:
             logger.exception("Failed to mount app")
             self.exit()
