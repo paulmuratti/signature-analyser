@@ -553,6 +553,13 @@ def parse_args() -> argparse.Namespace:
         epilog="Keywords are saved to .txt files sharing the base name of each image.",
     )
     parser.add_argument("input_dir", help="Directory containing PNG signature images")
+    parser.add_argument(
+        "--inference",
+        action="store_true",
+        default=False,
+        help="Enable AI vision inference to supplement built-in image analysis "
+             "(requires an API key in .env; disabled by default)",
+    )
     args = parser.parse_args()
 
     p = pathlib.Path(args.input_dir)
@@ -567,9 +574,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     load_dotenv()
-    provider, client = init_ai_client()
-
     args = parse_args()
+
+    if args.inference:
+        provider, client = init_ai_client()
+    else:
+        provider, client = "none", None
+        print_info("AI inference  : disabled  (pass --inference to enable)")
 
     png_files = find_png_files(args.input_dir)
     if not png_files:
