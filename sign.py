@@ -353,7 +353,7 @@ def _analyse_creative(image_path: pathlib.Path, provider: str, client: Any) -> l
 # ── Top-level analyser ────────────────────────────────────────────────────────
 
 def analyse_signature(image_path: pathlib.Path, provider: str, client: Any,
-                      *, inference: bool = False, creative: bool = False) -> list[str]:
+                      *, style: bool = False, creative: bool = False) -> list[str]:
     """Return combined keyword list for a signature image.
 
     CV analysis always runs.  AI requests are only made when the
@@ -376,7 +376,7 @@ def analyse_signature(image_path: pathlib.Path, provider: str, client: Any,
 
     keywords = _analyse_cv(binary, canvas_h, canvas_w)
 
-    if inference:
+    if style:
         keywords += _analyse_ai(image_path, provider, client)
 
     if creative:
@@ -568,12 +568,8 @@ def init_ai_client() -> tuple[str, Any]:
         result = try_anthropic() or try_openai()
 
     if result is None:
-        print_warning("No valid AI API key found — AI keyword inference will be skipped.")
-        print_warning("Set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env to enable.")
         return ("none", None)
 
-    provider, _ = result
-    print_info(f"AI provider  : {provider}")
     return result
 
 # ── Argument parser ───────────────────────────────────────────────────────────
@@ -586,19 +582,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("input_dir", help="Directory containing PNG signature images")
     parser.add_argument(
-        "--inference",
+        "--style",
         action="store_true",
         default=False,
-        help="Enable AI vision inference for visual-style keyword descriptors "
-             "(requires an API key in .env; disabled by default)",
+        help="Use AI to analyse visual style characteristics of the signature "
+             "(neat, messy, flowing, etc.) — requires an API key in .env",
     )
     parser.add_argument(
         "--creative",
         action="store_true",
         default=False,
-        help="Enable AI inference for broad personality and sex-attribute analysis "
-             "based on the signature (requires an API key in .env; disabled by default; "
-             "can be used independently of or alongside --inference)",
+        help="Use AI to infer broad personality and sex attributes from the signature — "
+             "requires an API key in .env; can be used independently of or alongside --style",
     )
     args = parser.parse_args()
 
@@ -616,11 +611,26 @@ def main() -> None:
     load_dotenv()
     args = parse_args()
 
-    if args.inference or args.creative:
+    if args.style or args.creative:
         provider, client = init_ai_client()
+        if provider == "none":
+            for flag in ("style", "creative"):
+                if getattr(args, flag):
+                    print_warning(
+                        f"--{flag} requested but no API key found — "
+                        "set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env"
+                    )
     else:
         provider, client = "none", None
-        print_info("AI inference  : disabled  (use --inference and/or --creative to enable)")
+
+    def _mode_status(enabled: bool) -> str:
+        if not enabled:
+            return "disabled"
+        return f"enabled  ({provider})" if provider != "none" else "disabled  (no API key)"
+
+    print_info(f"  CV analysis    : enabled")
+    print_info(f"  Style analysis : {_mode_status(args.style)}")
+    print_info(f"  Creative       : {_mode_status(args.creative)}")
 
     png_files = find_png_files(args.input_dir)
     if not png_files:
@@ -668,7 +678,7 @@ def main() -> None:
             try:
                 keywords = analyse_signature(
                     img_path, provider, client,
-                    inference=args.inference,
+                    style=args.style,
                     creative=args.creative,
                 )
             except Exception as exc:
