@@ -1,0 +1,14 @@
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Backup files created by sign.py
+dataset/_backup/
+_backup/
