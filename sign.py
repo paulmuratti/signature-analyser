@@ -278,9 +278,21 @@ _AI_PROMPT = (
     "legible, illegible. Return only the keywords, no explanation."
 )
 
+_CREATIVE_PROMPT = (
+    "Examine this handwritten signature and creatively infer attributes of its author. "
+    "Consider: probable gender expression, dominant personality traits, emotional "
+    "temperament, confidence level, introversion vs extroversion, creativity vs "
+    "analytical mindset, ambition, social tendencies, sensitivity, leadership qualities, "
+    "spontaneity vs discipline, and any other characteristics the signature's style, "
+    "flow, pressure, rhythm and form suggest about the person behind it. "
+    "Be broad and imaginative — this is an interpretive exercise, not a clinical "
+    "assessment. Return ONLY a comma-separated list of attribute keywords, no explanation."
+)
 
-def _analyse_ai(image_path: pathlib.Path, provider: str, client: Any) -> list[str]:
-    """Query vision AI and return everyday-language keyword descriptors."""
+
+def _call_vision_api(image_path: pathlib.Path, provider: str, client: Any,
+                     prompt: str) -> list[str]:
+    """Send image + prompt to the configured vision API; return keyword list."""
     if provider == "none" or client is None:
         return []
 
@@ -298,7 +310,7 @@ def _analyse_ai(image_path: pathlib.Path, provider: str, client: Any) -> list[st
                             "media_type": "image/png",
                             "data": img_data,
                         }},
-                        {"type": "text", "text": _AI_PROMPT},
+                        {"type": "text", "text": prompt},
                     ]}],
                 )
                 raw = response.content[0].text
@@ -310,7 +322,7 @@ def _analyse_ai(image_path: pathlib.Path, provider: str, client: Any) -> list[st
                         {"type": "image_url", "image_url": {
                             "url": f"data:image/png;base64,{img_data}",
                         }},
-                        {"type": "text", "text": _AI_PROMPT},
+                        {"type": "text", "text": prompt},
                     ]}],
                 )
                 raw = response.choices[0].message.content
@@ -328,10 +340,25 @@ def _analyse_ai(image_path: pathlib.Path, provider: str, client: Any) -> list[st
 
     return []
 
+
+def _analyse_ai(image_path: pathlib.Path, provider: str, client: Any) -> list[str]:
+    """Query vision AI for visual-style keyword descriptors."""
+    return _call_vision_api(image_path, provider, client, _AI_PROMPT)
+
+
+def _analyse_creative(image_path: pathlib.Path, provider: str, client: Any) -> list[str]:
+    """Query vision AI for broad personality and sex-attribute inferences."""
+    return _call_vision_api(image_path, provider, client, _CREATIVE_PROMPT)
+
 # ── Top-level analyser ────────────────────────────────────────────────────────
 
-def analyse_signature(image_path: pathlib.Path, provider: str, client: Any) -> list[str]:
-    """Return combined CV + AI keyword list for a signature image."""
+def analyse_signature(image_path: pathlib.Path, provider: str, client: Any,
+                      *, inference: bool = False, creative: bool = False) -> list[str]:
+    """Return combined keyword list for a signature image.
+
+    CV analysis always runs.  AI requests are only made when the
+    corresponding flag is True and a client is available.
+    """
     try:
         img = Image.open(image_path).convert("L")
     except (UnidentifiedImageError, OSError) as exc:
@@ -347,10 +374,15 @@ def analyse_signature(image_path: pathlib.Path, provider: str, client: Any) -> l
     if not binary.any():
         return ["blank-image"]
 
-    cv_keywords = _analyse_cv(binary, canvas_h, canvas_w)
-    ai_keywords = _analyse_ai(image_path, provider, client)
+    keywords = _analyse_cv(binary, canvas_h, canvas_w)
 
-    return cv_keywords + ai_keywords
+    if inference:
+        keywords += _analyse_ai(image_path, provider, client)
+
+    if creative:
+        keywords += _analyse_creative(image_path, provider, client)
+
+    return keywords
 
 # ── Conflict resolution ───────────────────────────────────────────────────────
 
@@ -557,8 +589,16 @@ def parse_args() -> argparse.Namespace:
         "--inference",
         action="store_true",
         default=False,
-        help="Enable AI vision inference to supplement built-in image analysis "
+        help="Enable AI vision inference for visual-style keyword descriptors "
              "(requires an API key in .env; disabled by default)",
+    )
+    parser.add_argument(
+        "--creative",
+        action="store_true",
+        default=False,
+        help="Enable AI inference for broad personality and sex-attribute analysis "
+             "based on the signature (requires an API key in .env; disabled by default; "
+             "can be used independently of or alongside --inference)",
     )
     args = parser.parse_args()
 
@@ -576,11 +616,11 @@ def main() -> None:
     load_dotenv()
     args = parse_args()
 
-    if args.inference:
+    if args.inference or args.creative:
         provider, client = init_ai_client()
     else:
         provider, client = "none", None
-        print_info("AI inference  : disabled  (pass --inference to enable)")
+        print_info("AI inference  : disabled  (use --inference and/or --creative to enable)")
 
     png_files = find_png_files(args.input_dir)
     if not png_files:
@@ -626,7 +666,11 @@ def main() -> None:
             render_progress(i, total, img_path.name, elapsed)
 
             try:
-                keywords = analyse_signature(img_path, provider, client)
+                keywords = analyse_signature(
+                    img_path, provider, client,
+                    inference=args.inference,
+                    creative=args.creative,
+                )
             except Exception as exc:
                 print_result(img_path.name, 0, success=False, reason=str(exc))
                 stats["failed"] += 1
