@@ -8,11 +8,12 @@ Uses Textual with the Nord theme for professional appearance.
 __version__ = "1.0.0"
 
 import argparse
+import logging
 import os
 import pathlib
 import sys
 import threading
-import time
+import traceback
 from typing import Any
 
 from dotenv import load_dotenv
@@ -32,19 +33,47 @@ from textual.widgets import (
 )
 from rich.console import Console
 
-# Import analysis logic from sign.py
-from sign import (
-    analyse_signature,
-    backup_file,
-    find_png_files,
-    init_ai_client,
-    parse_args,
-    write_keywords,
-)
+# ── Logging Setup ─────────────────────────────────────────────────────────────
 
-# Silence sign.py's Rich console output
-import sign as _sign
-_sign.console = Console(quiet=True)
+LOG_DIR = pathlib.Path.home() / ".cache" / "sign_tui"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = LOG_DIR / "sign_tui.log"
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stderr),
+    ],
+)
+logger = logging.getLogger(__name__)
+
+logger.info("=" * 70)
+logger.info(f"Starting Signature Analyser TUI v{__version__}")
+logger.info("=" * 70)
+
+
+# ── Imports from sign.py ──────────────────────────────────────────────────────
+
+try:
+    from sign import (
+        analyse_signature,
+        backup_file,
+        find_png_files,
+        init_ai_client,
+        parse_args,
+        write_keywords,
+    )
+
+    # Silence sign.py's Rich console output
+    import sign as _sign
+
+    _sign.console = Console(quiet=True)
+    logger.info("Successfully imported analysis functions from sign.py")
+except Exception as e:
+    logger.exception("Failed to import from sign.py")
+    sys.exit(1)
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────
@@ -88,6 +117,15 @@ class WorkerCancelled(Message):
     pass
 
 
+class ErrorOccurred(Message):
+    """An error occurred during processing."""
+
+    def __init__(self, title: str, message: str) -> None:
+        super().__init__()
+        self.title = title
+        self.message = message
+
+
 # ── Modals ────────────────────────────────────────────────────────────────────
 
 class ConfirmScreen(ModalScreen):
@@ -100,7 +138,9 @@ class ConfirmScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         yield Vertical(
-            Static(f"Found [warning]{self.count}[/] image file(s) in [detail]'{self.path}'[/]"),
+            Static(
+                f"Found [warning]{self.count}[/] image file(s) in [detail]'{self.path}'[/]"
+            ),
             Static("Proceed with analysis?"),
             Horizontal(
                 Button("Yes", id="btn_yes", variant="primary"),
@@ -136,15 +176,43 @@ class ConflictModal(ModalScreen):
         )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        action_map = {
-            "btn_append": "append",
-            "btn_overwrite": "overwrite",
-            "btn_skip": "skip",
-            "btn_cancel": "cancel",
-        }
-        action = action_map.get(event.button.id, "skip")
-        apply_all = self.query_one("#chk_apply_all", Checkbox).value
-        self.dismiss((action, apply_all))
+        try:
+            action_map = {
+                "btn_append": "append",
+                "btn_overwrite": "overwrite",
+                "btn_skip": "skip",
+                "btn_cancel": "cancel",
+            }
+            action = action_map.get(event.button.id, "skip")
+            apply_all = self.query_one("#chk_apply_all", Checkbox).value
+            self.dismiss((action, apply_all))
+        except Exception as e:
+            logger.exception("Error in ConflictModal.on_button_pressed")
+            self.dismiss(("cancel", False))
+
+
+class ErrorModal(ModalScreen):
+    """Error display modal."""
+
+    def __init__(self, title: str, message: str) -> None:
+        super().__init__()
+        self.error_title = title
+        self.error_message = message
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static(f"[error]{self.error_title}[/]"),
+            Static(f"[info]{self.error_message}[/]"),
+            Static("(See ~/.cache/sign_tui/sign_tui.log for details)"),
+            Horizontal(
+                Button("OK", id="btn_ok", variant="primary"),
+                id="error-buttons",
+            ),
+            id="error-container",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss()
 
 
 # ── MainScreen ────────────────────────────────────────────────────────────────
@@ -204,7 +272,9 @@ class MainScreen(Screen):
         padding: 1 2;
     }
 
-    #confirm-container, #conflict-container {
+    #confirm-container,
+    #conflict-container,
+    #error-container {
         width: 60;
         height: auto;
         background: $surface;
@@ -262,44 +332,69 @@ class MainScreen(Screen):
 
     def _init_and_confirm(self) -> None:
         """Load config, find files, show confirmation."""
-        # Load dotenv and parse arguments
-        load_dotenv()
-        self.app.args = parse_args()
+        try:
+            logger.info("Starting initialization")
 
-        # Initialize AI client
-        if self.app.args.style or self.app.args.creative:
-            self.app.provider, self.app.client = init_ai_client()
-        else:
-            self.app.provider, self.app.client = "none", None
+            # Load dotenv and parse arguments
+            load_dotenv()
+            self.app.args = parse_args()
+            logger.info(f"Parsed args: input_dir={self.app.args.input_dir}, style={self.app.args.style}, creative={self.app.args.creative}")
 
-        # Update mode status
-        cv_status = "[success]enabled[/]"
-        self.query_one("#mode-cv", Static).update(cv_status)
+            # Initialize AI client
+            if self.app.args.style or self.app.args.creative:
+                try:
+                    self.app.provider, self.app.client = init_ai_client()
+                    logger.info(f"AI client initialized: provider={self.app.provider}")
+                except Exception as e:
+                    logger.warning(f"Failed to init AI client: {e}")
+                    self.app.provider, self.app.client = "none", None
+            else:
+                self.app.provider, self.app.client = "none", None
+                logger.info("AI disabled via CLI flags")
 
-        style_status = self._mode_status(self.app.args.style)
-        self.query_one("#mode-style", Static).update(style_status)
+            # Update mode status
+            cv_status = "[success]enabled[/]"
+            self.query_one("#mode-cv", Static).update(cv_status)
 
-        creative_status = self._mode_status(self.app.args.creative)
-        self.query_one("#mode-creative", Static).update(creative_status)
+            style_status = self._mode_status(self.app.args.style)
+            self.query_one("#mode-style", Static).update(style_status)
 
-        # Find PNG files
-        self.app.png_files = find_png_files(str(self.app.args.input_dir))
-        if not self.app.png_files:
+            creative_status = self._mode_status(self.app.args.creative)
+            self.query_one("#mode-creative", Static).update(creative_status)
+
+            # Find PNG files
+            try:
+                self.app.png_files = find_png_files(str(self.app.args.input_dir))
+                logger.info(f"Found {len(self.app.png_files)} PNG files")
+            except Exception as e:
+                logger.exception(f"Failed to find PNG files: {e}")
+                self.app.post_message(ErrorOccurred("File Discovery Error", f"Could not scan directory: {e}"))
+                self.app.exit()
+                return
+
+            if not self.app.png_files:
+                logger.warning("No PNG files found")
+                self.app.post_message(ErrorOccurred("No Files", f"No PNG files found in '{self.app.args.input_dir}'"))
+                self.app.exit()
+                return
+
+            # Update file count
+            count = len(self.app.png_files)
+            self.query_one("#file-count", Static).update(
+                f"\n[info]Found [/][warning]{count}[/][info] image file(s) in "
+                f"[detail]'{self.app.args.input_dir}'[/][info].[/]"
+            )
+
+            # Show confirmation
+            self.app.push_screen(
+                ConfirmScreen(count, str(self.app.args.input_dir)),
+                self._on_confirmed,
+            )
+
+        except Exception as e:
+            logger.exception("Error during initialization")
+            self.app.post_message(ErrorOccurred("Initialization Error", f"Failed to initialize: {e}"))
             self.app.exit()
-            return
-
-        # Update file count
-        count = len(self.app.png_files)
-        self.query_one("#file-count", Static).update(
-            f"\n[info]Found [/][warning]{count}[/][info] image file(s) in "
-            f"[detail]'{self.app.args.input_dir}'[/][info].[/]"
-        )
-
-        # Show confirmation
-        self.app.push_screen(
-            ConfirmScreen(count, str(self.app.args.input_dir)),
-            self._on_confirmed,
-        )
 
     def _mode_status(self, flag_enabled: bool) -> str:
         """Format mode status line."""
@@ -311,31 +406,41 @@ class MainScreen(Screen):
 
     def _on_confirmed(self, confirmed: bool) -> None:
         """User confirmed or cancelled."""
-        if not confirmed:
-            self.app.exit()
-            return
+        try:
+            if not confirmed:
+                logger.info("User cancelled analysis")
+                self.app.exit()
+                return
 
-        # Show progress and current file
-        self.query_one("#progress", ProgressBar).styles.display = "block"
-        self.query_one("#current-file", Static).styles.display = "block"
+            logger.info("User confirmed analysis, starting worker")
 
-        # Initialize stats
-        self.app.stats = {
-            "total": len(self.app.png_files),
-            "processed": 0,
-            "no_change": 0,
-            "skipped": 0,
-            "failed": 0,
-            "keywords": 0,
-            "backed_up": 0,
-            "backup_dir": None,
-        }
+            # Show progress and current file
+            self.query_one("#progress", ProgressBar).styles.display = "block"
+            self.query_one("#current-file", Static).styles.display = "block"
 
-        # Start worker
-        self.run_analysis()
+            # Initialize stats
+            self.app.stats = {
+                "total": len(self.app.png_files),
+                "processed": 0,
+                "no_change": 0,
+                "skipped": 0,
+                "failed": 0,
+                "keywords": 0,
+                "backed_up": 0,
+                "backup_dir": None,
+            }
+
+            # Start worker
+            self._run_worker()
+
+        except Exception as e:
+            logger.exception("Error in _on_confirmed")
+            self.app.post_message(ErrorOccurred("Confirmation Error", f"Failed to start: {e}"))
 
     @staticmethod
-    def _format_result_line(filename: str, keyword_count: int, status: str, reason: str = "") -> str:
+    def _format_result_line(
+        filename: str, keyword_count: int, status: str, reason: str = ""
+    ) -> str:
         """Format a per-file result line with Rich markup."""
         name = f"{filename:<38}"
         count = f"{keyword_count:>3} keywords"
@@ -389,177 +494,212 @@ class MainScreen(Screen):
     def _get_app() -> "SignApp":
         """Get the app instance."""
         from textual.app import active_app
+
         return active_app.get()
 
     def _on_conflict_resolved(self, result: tuple[str, bool]) -> None:
         """Callback when ConflictModal is dismissed."""
-        action, apply_all = result
-        if apply_all and action != "cancel":
-            self.app.global_action = action
-            self.query_one("#global-action", Static).update(
-                f"[yellow]All conflicts: {action}[/]"
-            )
-            self.query_one("#global-action").styles.display = "block"
-        self.app._conflict_result = action
-        self.app._conflict_event.set()
+        try:
+            action, apply_all = result
+            if apply_all and action != "cancel":
+                self.app.global_action = action
+                self.query_one("#global-action", Static).update(
+                    f"[yellow]All conflicts: {action}[/]"
+                )
+                self.query_one("#global-action").styles.display = "block"
+                logger.info(f"Global action set to: {action}")
+            self.app._conflict_result = action
+            self.app._conflict_event.set()
+        except Exception as e:
+            logger.exception("Error in _on_conflict_resolved")
+            self.app._conflict_result = "cancel"
+            self.app._conflict_event.set()
 
     def on_file_started(self, message: FileStarted) -> None:
         """Update UI when a file starts processing."""
-        progress = self.query_one("#progress", ProgressBar)
-        progress.update(advance=1)
-        self.query_one("#current-file", Static).update(
-            f"[muted]Processing: {message.filename}[/]"
-        )
+        try:
+            progress = self.query_one("#progress", ProgressBar)
+            progress.update(advance=1)
+            self.query_one("#current-file", Static).update(
+                f"[muted]Processing: {message.filename}[/]"
+            )
+        except Exception as e:
+            logger.exception(f"Error updating UI for file start: {e}")
 
     def on_file_result(self, message: FileResult) -> None:
         """Process a file result and update stats."""
-        log = self.query_one("#result-log", RichLog)
-        line = self._format_result_line(
-            message.filename,
-            message.keyword_count,
-            message.status,
-            message.reason,
-        )
-        log.write(line)
+        try:
+            log = self.query_one("#result-log", RichLog)
+            line = self._format_result_line(
+                message.filename,
+                message.keyword_count,
+                message.status,
+                message.reason,
+            )
+            log.write(line)
 
-        # Update stats
-        if message.status == "success":
-            self.app.stats["processed"] += 1
-            self.app.stats["keywords"] += message.keyword_count
-            if message.backup_path:
-                self.app.stats["backed_up"] += 1
-                self.app.stats["backup_dir"] = str(pathlib.Path(message.backup_path).parent)
-        elif message.status == "skipped":
-            self.app.stats["skipped"] += 1
-        elif message.status == "no_change":
-            self.app.stats["no_change"] += 1
-        elif message.status == "failed":
-            self.app.stats["failed"] += 1
+            # Update stats
+            if message.status == "success":
+                self.app.stats["processed"] += 1
+                self.app.stats["keywords"] += message.keyword_count
+                if message.backup_path:
+                    self.app.stats["backed_up"] += 1
+                    self.app.stats["backup_dir"] = str(
+                        pathlib.Path(message.backup_path).parent
+                    )
+            elif message.status == "skipped":
+                self.app.stats["skipped"] += 1
+            elif message.status == "no_change":
+                self.app.stats["no_change"] += 1
+            elif message.status == "failed":
+                self.app.stats["failed"] += 1
+
+        except Exception as e:
+            logger.exception(f"Error processing file result: {e}")
 
     def on_worker_complete(self, message: WorkerComplete) -> None:
         """Show summary when worker completes."""
-        self.query_one("#current-file", Static).update("")
-        self.query_one("#summary-panel", Static).update(self._format_summary())
-        self.query_one("#summary-panel").styles.display = "block"
+        try:
+            self.query_one("#current-file", Static).update("")
+            self.query_one("#summary-panel", Static).update(self._format_summary())
+            self.query_one("#summary-panel").styles.display = "block"
+            logger.info("Analysis complete")
+        except Exception as e:
+            logger.exception("Error displaying completion summary")
 
     def on_worker_cancelled(self, message: WorkerCancelled) -> None:
         """Show partial summary when user cancels."""
-        self.query_one("#current-file", Static).update("[warning]Cancelled by user[/]")
-        self.query_one("#summary-panel", Static).update(self._format_summary())
-        self.query_one("#summary-panel").styles.display = "block"
+        try:
+            self.query_one("#current-file", Static).update(
+                "[warning]Cancelled by user[/]"
+            )
+            self.query_one("#summary-panel", Static).update(self._format_summary())
+            self.query_one("#summary-panel").styles.display = "block"
+            logger.info("Analysis cancelled by user")
+        except Exception as e:
+            logger.exception("Error displaying cancellation summary")
 
-    @staticmethod
-    def _action_map(key: str) -> str:
-        """Map user input to action."""
-        mapping = {
-            "": "append",
-            "a": "append",
-            "o": "overwrite",
-            "s": "skip",
-            "c": "cancel",
-        }
-        return mapping.get(key.rstrip("+"), "skip")
+    def on_error_occurred(self, message: ErrorOccurred) -> None:
+        """Display an error modal."""
+        try:
+            logger.error(f"Error: {message.title} - {message.message}")
+            self.app.push_screen(ErrorModal(message.title, message.message))
+        except Exception as e:
+            logger.exception("Error displaying error modal")
 
-    def run_analysis(self) -> None:
+    def _run_worker(self) -> None:
         """Start the background worker."""
-        self.run_worker(self._worker_analysis)
-
-    def run_worker(self, worker_fn) -> None:
-        """Run a worker in the background via the work decorator."""
-
-        def _run():
-            worker_fn()
-
-        # Use call_from_thread to safely run the worker in a background thread
-        import threading
-
-        thread = threading.Thread(target=_run, daemon=True)
+        app = self.app
+        thread = threading.Thread(target=self._worker_analysis, daemon=True)
         thread.start()
+        logger.info("Worker thread started")
 
     def _worker_analysis(self) -> None:
         """Background worker: process all files."""
         app = self.app
 
-        for img_path in app.png_files:
-            # Post progress update
+        try:
+            for idx, img_path in enumerate(app.png_files):
+                try:
+                    # Post progress update
+                    app.call_from_thread(
+                        app.post_message,
+                        FileStarted(img_path.name),
+                    )
+
+                    # Analyse signature
+                    try:
+                        keywords = analyse_signature(
+                            img_path,
+                            app.provider,
+                            app.client,
+                            style=app.args.style,
+                            creative=app.args.creative,
+                        )
+                    except Exception as exc:
+                        logger.exception(f"Analysis failed for {img_path.name}: {exc}")
+                        app.call_from_thread(
+                            app.post_message,
+                            FileResult(img_path.name, 0, "failed", str(exc)),
+                        )
+                        continue
+
+                    # Resolve conflict
+                    txt_path = img_path.with_suffix(".txt")
+                    if txt_path.exists() and app.global_action is None:
+                        # Clear event, push modal, wait
+                        app._conflict_event.clear()
+                        app.call_from_thread(
+                            app.push_screen,
+                            ConflictModal(txt_path.name),
+                            self._on_conflict_resolved,
+                        )
+                        # Wait for modal resolution (with timeout to prevent hanging)
+                        if not app._conflict_event.wait(timeout=60):
+                            logger.warning("Conflict resolution timeout")
+                            app._conflict_result = "cancel"
+                        action = app._conflict_result
+                    elif app.global_action is not None:
+                        action = app.global_action
+                    else:
+                        action = "overwrite"
+
+                    if action == "cancel":
+                        logger.info("User cancelled analysis")
+                        app.call_from_thread(
+                            app.post_message,
+                            WorkerCancelled(),
+                        )
+                        return
+
+                    if action == "skip":
+                        app.call_from_thread(
+                            app.post_message,
+                            FileResult(img_path.name, len(keywords), "skipped"),
+                        )
+                        continue
+
+                    # Write keywords
+                    try:
+                        backup_path, changed = write_keywords(txt_path, keywords, action)
+                    except Exception as exc:
+                        logger.exception(f"Write failed for {txt_path}: {exc}")
+                        app.call_from_thread(
+                            app.post_message,
+                            FileResult(img_path.name, 0, "failed", str(exc)),
+                        )
+                        continue
+
+                    status = "no_change" if not changed else "success"
+                    app.call_from_thread(
+                        app.post_message,
+                        FileResult(
+                            img_path.name,
+                            len(keywords),
+                            status,
+                            backup_path=str(backup_path) if backup_path else None,
+                        ),
+                    )
+
+                except Exception as e:
+                    logger.exception(f"Error processing file {idx}: {e}")
+                    app.call_from_thread(
+                        app.post_message,
+                        FileResult("unknown", 0, "failed", f"Unexpected error: {str(e)[:50]}"),
+                    )
+
+            # Signal completion
             app.call_from_thread(
                 app.post_message,
-                FileStarted(img_path.name),
+                WorkerComplete(),
             )
 
-            # Analyse signature
-            try:
-                keywords = analyse_signature(
-                    img_path,
-                    app.provider,
-                    app.client,
-                    style=app.args.style,
-                    creative=app.args.creative,
-                )
-            except Exception as exc:
-                app.call_from_thread(
-                    app.post_message,
-                    FileResult(img_path.name, 0, "failed", str(exc)),
-                )
-                continue
-
-            # Resolve conflict
-            txt_path = img_path.with_suffix(".txt")
-            if txt_path.exists() and app.global_action is None:
-                # Clear event, push modal, wait
-                app._conflict_event.clear()
-                app.call_from_thread(
-                    app.push_screen,
-                    ConflictModal(txt_path.name),
-                    self._on_conflict_resolved,
-                )
-                app._conflict_event.wait()
-                action = app._conflict_result
-            elif app.global_action is not None:
-                action = app.global_action
-            else:
-                action = "overwrite"
-
-            if action == "cancel":
-                app.call_from_thread(
-                    app.post_message,
-                    WorkerCancelled(),
-                )
-                return
-
-            if action == "skip":
-                app.call_from_thread(
-                    app.post_message,
-                    FileResult(img_path.name, len(keywords), "skipped"),
-                )
-                continue
-
-            # Write keywords
-            try:
-                backup_path, changed = write_keywords(txt_path, keywords, action)
-            except OSError as exc:
-                app.call_from_thread(
-                    app.post_message,
-                    FileResult(img_path.name, 0, "failed", str(exc)),
-                )
-                continue
-
-            status = "no_change" if not changed else "success"
+        except Exception as e:
+            logger.exception(f"Worker thread failed: {e}")
             app.call_from_thread(
                 app.post_message,
-                FileResult(
-                    img_path.name,
-                    len(keywords),
-                    status,
-                    backup_path=str(backup_path) if backup_path else None,
-                ),
+                ErrorOccurred("Worker Error", f"Analysis failed: {str(e)[:100]}"),
             )
-
-        # Signal completion
-        app.call_from_thread(
-            app.post_message,
-            WorkerComplete(),
-        )
 
 
 # ── SignApp ───────────────────────────────────────────────────────────────────
@@ -574,7 +714,7 @@ class SignApp(App):
     args: argparse.Namespace
     provider: str
     client: Any
-    png_files: list[pathlib.Path]
+    png_files: list[pathlib.Path] = []
     global_action: str | None = None
     stats: dict[str, Any] = {}
 
@@ -589,10 +729,23 @@ class SignApp(App):
 
     def on_mount(self) -> None:
         """Initialize app state."""
-        self._conflict_event = threading.Event()
-        self.push_screen(MainScreen())
+        try:
+            self._conflict_event = threading.Event()
+            self.push_screen(MainScreen())
+            logger.info("Main screen pushed")
+        except Exception as e:
+            logger.exception("Failed to mount app")
+            self.exit()
 
 
 if __name__ == "__main__":
-    app = SignApp()
-    app.run()
+    try:
+        app = SignApp()
+        app.run()
+    except Exception as e:
+        logger.exception("Fatal error running app")
+        print(f"\n[ERROR] Application failed: {e}")
+        print(f"[INFO] See ~/.cache/sign_tui/sign_tui.log for details")
+        sys.exit(1)
+    finally:
+        logger.info("Application exiting")
