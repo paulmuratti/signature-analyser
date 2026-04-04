@@ -21,69 +21,28 @@ import numpy as np
 from dotenv import load_dotenv
 from PIL import Image, UnidentifiedImageError
 from scipy.ndimage import binary_erosion, distance_transform_edt, label
+from rich.console import Console
+from rich.theme import Theme
 
-# ── Colorama shim (degrades gracefully if not installed) ─────────────────────
-try:
-    from colorama import Fore, Style
-    from colorama import init as _colorama_init
-    _colorama_init(autoreset=True)
-except ImportError:
-    class _Noop:  # type: ignore[no-redef]
-        def __getattr__(self, _: str) -> str:
-            return ""
-    Fore = Style = _Noop()  # type: ignore[assignment]
+# ── Rich theme (from TUI_SPEC.md) ─────────────────────────────────────────────
+_THEME = Theme({
+    "info": "white",
+    "detail": "bright_white",
+    "success": "bright_green",
+    "warning": "bright_yellow",
+    "error": "bright_red",
+    "header": "bright_magenta",
+    "progress": "bright_blue",
+    "muted": "dim white",
+})
 
-C_SUCCESS   = Style.BRIGHT + Fore.GREEN      # vivid green  — success / ok
-C_FAIL      = Style.BRIGHT + Fore.RED        # vivid red    — errors
-C_WARN      = Style.BRIGHT + Fore.YELLOW     # vivid yellow — warnings
-C_INFO      = Fore.CYAN                      # cyan         — labels / info (already bright)
-C_PROGRESS  = Style.BRIGHT + Fore.BLUE       # bright blue  — progress bar (plain blue is near-invisible on black)
-C_HEADER    = Style.BRIGHT + Fore.MAGENTA    # bright pink  — section headers (plain magenta reads as dark purple)
-C_NOCHANGE  = Fore.WHITE                     # white        — neutral / no-change
-C_RESET     = Style.RESET_ALL
+console = Console(theme=_THEME)
 
-# ── Output helpers ────────────────────────────────────────────────────────────
+# ── Progress tracking ────────────────────────────────────────────────────────
 
-def print_header(msg: str) -> None:
-    print(f"{C_HEADER}{msg}{C_RESET}")
-
-def print_info(msg: str) -> None:
-    print(f"{C_INFO}{msg}{C_RESET}")
-
-def print_success(msg: str) -> None:
-    print(f"{C_SUCCESS}{msg}{C_RESET}")
-
-def print_warning(msg: str) -> None:
-    print(f"{C_WARN}WARNING: {msg}{C_RESET}")
-
-def print_error(msg: str) -> None:
-    print(f"{C_FAIL}ERROR: {msg}{C_RESET}", file=sys.stderr)
-
-# ── Progress bar ──────────────────────────────────────────────────────────────
-
-def render_progress(current: int, total: int, filename: str, elapsed: float,
-                    bar_width: int = 38) -> None:
-    """Write a single-line progress bar to stdout using carriage return."""
-    pct = int(current / total * 100) if total > 0 else 0
-    filled = min(int(bar_width * current / total) if total > 0 else 0, bar_width - 1)
-    bar = "=" * filled + ">" + " " * (bar_width - filled - 1)
-
-    h = int(elapsed // 3600)
-    m = int((elapsed % 3600) // 60)
-    s = int(elapsed % 60)
-    elapsed_str = f"{h:02d}:{m:02d}:{s:02d}"
-
-    max_name = 32
-    name = filename if len(filename) <= max_name else "\u2026" + filename[-(max_name - 1):]
-
-    line = (f"{C_PROGRESS}[{bar}]{C_RESET} {pct:3d}%"
-            f" | {name:<{max_name}} | {elapsed_str}")
-    sys.stdout.write(f"\r{line}")
-    sys.stdout.flush()
-
-    if current == total:
-        sys.stdout.write("\n")
-        sys.stdout.flush()
+# Module-level progress bar (set during main loop)
+_progress = None
+_progress_task = None
 
 # ── Image discovery ───────────────────────────────────────────────────────────
 
@@ -335,7 +294,7 @@ def _call_vision_api(image_path: pathlib.Path, provider: str, client: Any,
             if attempt == 0 and "rate" in str(exc).lower():
                 time.sleep(1)
                 continue
-            print_warning(f"AI inference failed for {image_path.name}: {exc}")
+            console.print(f"[warning]![/] [warning]AI inference failed for {image_path.name}: {exc}[/]")
             return []
 
     return []
@@ -407,18 +366,16 @@ def resolve_output_conflict(txt_path: pathlib.Path) -> str:
     if _GLOBAL_ACTION is not None:
         return _GLOBAL_ACTION
 
-    # Advance past the progress bar before prompting
-    sys.stdout.write("\n")
-    sys.stdout.flush()
+    # Clear progress bar before prompting
+    console.print()
 
-    print_warning(f"'{txt_path.name}' already exists.")
-    print(f"  {C_INFO}[A]ppend  [O]verwrite  [S]kip  [C]ancel  (default: Append){C_RESET}")
-    print(f"  {C_INFO}Add '+' to auto-apply to all remaining files without prompting  "
-          f"(e.g. 'o+'){C_RESET}")
+    console.print(f"[warning]![/] [warning]'{txt_path.name}' already exists.[/]")
+    console.print("[info][A]ppend  [O]verwrite  [S]kip  [C]ancel  (default: Append)[/]")
+    console.print("[info]Add '+' to auto-apply to all remaining files without prompting  (e.g. 'o+')[/]")
 
     for _ in range(3):
         try:
-            raw = input("  Choice: ").strip().lower()
+            raw = console.input("[info]Choice: [/]").strip().lower()
         except EOFError:
             return "skip"
 
@@ -429,12 +386,12 @@ def resolve_output_conflict(txt_path: pathlib.Path) -> str:
             action = _ACTION_MAP[key]
             if apply_all and action != "cancel":
                 _GLOBAL_ACTION = action
-                print_info(f"  '{action}' will be applied automatically to all remaining conflicts.")
+                console.print(f"[info]'{action}' will be applied automatically to all remaining conflicts.[/]")
             return action
 
-        print_warning(f"Unrecognised input '{raw}'. Please enter A, O, S, or C.")
+        console.print(f"[warning]![/] [warning]Unrecognised input '{raw}'. Please enter A, O, S, or C.[/]")
 
-    print_info("No valid input received — defaulting to 'append'.")
+    console.print("[info]No valid input received — defaulting to 'append'.[/]")
     return "append"
 
 # ── File backup ───────────────────────────────────────────────────────────────
@@ -492,42 +449,39 @@ def write_keywords(txt_path: pathlib.Path, keywords: list[str],
 def print_result(filename: str, keyword_count: int, *, success: bool,
                  skipped: bool = False, no_change: bool = False,
                  reason: str = "") -> None:
-    sys.stdout.write("\n")
+    console.print()
     name = f"{filename:<38}"
     count = f"{keyword_count:>3} keywords"
     if skipped:
-        print(f"  {C_WARN}{name}  {count}  SKIPPED{C_RESET}")
+        console.print(f"  [warning]{name}  {count}  SKIPPED[/]")
     elif no_change:
-        print(f"  {C_NOCHANGE}{name}  {count}  NO CHANGE{C_RESET}")
+        console.print(f"  [muted]{name}  {count}  NO CHANGE[/]")
     elif success:
-        print(f"  {C_SUCCESS}{name}  {count}  SUCCESS{C_RESET}")
+        console.print(f"  [success]✓[/] [success]{name}  {count}  SUCCESS[/]")
     else:
         reason_str = f": {reason}" if reason else ""
-        print(f"  {C_FAIL}{name}  {count}  FAILED{reason_str}{C_RESET}")
+        console.print(f"  [error]✗[/] [error]{name}  {count}  FAILED{reason_str}[/]")
 
 # ── Final summary ─────────────────────────────────────────────────────────────
 
 def print_summary(stats: dict[str, Any]) -> None:
-    bar = "\u2550" * 52
-    print()
-    print_header(bar)
-    print_header("  Analysis Complete")
-    print_header(bar)
-    print_info(f"  Total files    : {stats['total']}")
-    print_info(f"  Processed      : {stats['processed']}")
+    console.print()
+    console.rule("[header]Analysis Complete[/]")
+    console.print(f"  [info]Total files   [/] : [detail]{stats['total']}[/]")
+    console.print(f"  [info]Processed     [/] : [detail]{stats['processed']}[/]")
     if stats["no_change"] > 0:
-        print(f"{C_NOCHANGE}  No change      : {stats['no_change']}{C_RESET}")
+        console.print(f"  [muted]No change     [/] : [muted]{stats['no_change']}[/]")
     else:
-        print_info(f"  No change      : {stats['no_change']}")
-    print_info(f"  Skipped        : {stats['skipped']}")
+        console.print(f"  [info]No change     [/] : [detail]{stats['no_change']}[/]")
+    console.print(f"  [info]Skipped       [/] : [detail]{stats['skipped']}[/]")
     failed = stats["failed"]
     if failed > 0:
-        print(f"{C_FAIL}  Failed         : {failed}{C_RESET}")
+        console.print(f"  [error]Failed        [/] : [error]{failed}[/]")
     else:
-        print_info(f"  Failed         : {failed}")
-    print_info(f"  Total keywords : {stats['keywords']}")
+        console.print(f"  [info]Failed        [/] : [detail]{failed}[/]")
+    console.print(f"  [info]Total keywords[/] : [detail]{stats['keywords']}[/]")
     if stats["backed_up"] > 0:
-        print_info(f"  Files backed up: {stats['backed_up']}  \u2192  {stats['backup_dir']}")
+        console.print(f"  [info]Files backed up[/] : [detail]{stats['backed_up']} [info]→[/] [detail]{stats['backup_dir']}[/]")
 
 # ── AI client initialisation ──────────────────────────────────────────────────
 
@@ -546,7 +500,7 @@ def init_ai_client() -> tuple[str, Any]:
             import anthropic  # noqa: PLC0415
             return ("anthropic", anthropic.Anthropic(api_key=anthropic_key))
         except ImportError:
-            print_warning("'anthropic' package not installed. Run: pip install anthropic")
+            console.print("[warning]![/] [warning]'anthropic' package not installed. Run: pip install anthropic[/]")
             return None
 
     def try_openai() -> tuple[str, Any] | None:
@@ -556,7 +510,7 @@ def init_ai_client() -> tuple[str, Any]:
             import openai  # noqa: PLC0415
             return ("openai", openai.OpenAI(api_key=openai_key))
         except ImportError:
-            print_warning("'openai' package not installed. Run: pip install openai")
+            console.print("[warning]![/] [warning]'openai' package not installed. Run: pip install openai[/]")
             return None
 
     result: tuple[str, Any] | None
@@ -611,47 +565,62 @@ def main() -> None:
     load_dotenv()
     args = parse_args()
 
+    # ── Title ─────────────────────────────────────────────────────────────────
+    console.print()
+    console.rule("[header]══  Signature Keyword Analyser  ══[/]")
+    console.print()
+
+    # ── AI client init ────────────────────────────────────────────────────────
     if args.style or args.creative:
         provider, client = init_ai_client()
         if provider == "none":
             for flag in ("style", "creative"):
                 if getattr(args, flag):
-                    print_warning(
-                        f"--{flag} requested but no API key found — "
-                        "set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env"
+                    console.print(
+                        f"[warning]![/] [warning]--{flag} requested but no API key found — "
+                        "set ANTHROPIC_API_KEY or OPENAI_API_KEY in .env[/]"
                     )
     else:
         provider, client = "none", None
 
-    def _mode_status(enabled: bool) -> str:
-        if not enabled:
-            return "disabled"
-        return f"enabled  ({provider})" if provider != "none" else "disabled  (no API key)"
+    # ── Analysis mode status ──────────────────────────────────────────────────
+    _W = 14  # width of longest label: "Style analysis"
 
-    print_info(f"  CV analysis    : enabled")
-    print_info(f"  Style analysis : {_mode_status(args.style)}")
-    print_info(f"  Creative       : {_mode_status(args.creative)}")
+    def _mode_status(flag_enabled: bool) -> str:
+        if not flag_enabled:
+            return "[info]disabled[/]"
+        if provider != "none":
+            return f"[success]enabled[/]  [detail]({provider})[/]"
+        return "[info]disabled[/]  [warning](no API key)[/]"
 
+    console.print(f"  [detail]{'CV analysis':<{_W}}[/] : [success]enabled[/]")
+    console.print(f"  [detail]{'Style analysis':<{_W}}[/] : {_mode_status(args.style)}")
+    console.print(f"  [detail]{'Creative':<{_W}}[/] : {_mode_status(args.creative)}")
+
+    # ── Locate images ─────────────────────────────────────────────────────────
     png_files = find_png_files(args.input_dir)
     if not png_files:
-        print_error(f"No PNG files found in '{args.input_dir}'.")
+        console.print(f"[error]✗[/] [error]No image files found in '{args.input_dir}'.[/]")
         sys.exit(1)
 
     total = len(png_files)
-    print_info(f"\nFound {total} PNG file(s) in '{args.input_dir}'.")
+    console.print(
+        f"\n  [info]Found [/][warning]{total}[/][info] image file(s) in "
+        f"[detail]'{args.input_dir}'[/][info].[/]"
+    )
 
     try:
-        confirm = input(f"{C_INFO}Proceed with analysis? [y/N]: {C_RESET}").strip().lower()
+        confirm = console.input(
+            "[info]Proceed with analysis? [warning][y/N][/] [info]: [/]"
+        ).strip().lower()
     except EOFError:
         confirm = "n"
 
     if confirm != "y":
-        print_info("Aborted.")
+        console.print("[info]Aborted.[/]")
         sys.exit(0)
 
-    print_header(f"\n{'═' * 52}")
-    print_header("  Analysing signatures \u2026")
-    print_header(f"{'═' * 52}\n")
+    console.rule("[header]Analysing signatures …[/]")
 
     stats: dict[str, Any] = {
         "total": total,
@@ -665,67 +634,75 @@ def main() -> None:
     }
 
     cancel = False
-    start_time = time.monotonic()
 
     try:
-        for i, img_path in enumerate(png_files):
-            if cancel:
-                break
+        from rich.progress import Progress, BarColumn, TimeRemainingColumn
 
-            elapsed = time.monotonic() - start_time
-            render_progress(i, total, img_path.name, elapsed)
+        with Progress(
+            BarColumn(bar_width=40),
+            TimeRemainingColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task(
+                "[progress]Processing signatures[/]",
+                total=total
+            )
 
-            try:
-                keywords = analyse_signature(
-                    img_path, provider, client,
-                    style=args.style,
-                    creative=args.creative,
-                )
-            except Exception as exc:
-                print_result(img_path.name, 0, success=False, reason=str(exc))
-                stats["failed"] += 1
-                continue
+            for i, img_path in enumerate(png_files):
+                if cancel:
+                    break
 
-            txt_path = img_path.with_suffix(".txt")
-            action = resolve_output_conflict(txt_path)
+                # Update progress with current filename
+                progress.update(task, description=f"[progress]{img_path.name}[/]", advance=1)
 
-            if action == "cancel":
-                cancel = True
-                stats["skipped"] += 1
-                break
+                try:
+                    keywords = analyse_signature(
+                        img_path, provider, client,
+                        style=args.style,
+                        creative=args.creative,
+                    )
+                except Exception as exc:
+                    print_result(img_path.name, 0, success=False, reason=str(exc))
+                    stats["failed"] += 1
+                    continue
 
-            if action == "skip":
-                print_result(img_path.name, len(keywords), success=True, skipped=True)
-                stats["skipped"] += 1
-                continue
+                txt_path = img_path.with_suffix(".txt")
+                action = resolve_output_conflict(txt_path)
 
-            try:
-                backup_path, changed = write_keywords(txt_path, keywords, action)
-            except OSError as exc:
-                print_result(img_path.name, 0, success=False, reason=str(exc))
-                stats["failed"] += 1
-                continue
+                if action == "cancel":
+                    cancel = True
+                    stats["skipped"] += 1
+                    break
 
-            if not changed:
-                print_result(img_path.name, len(keywords), success=True, no_change=True)
-                stats["no_change"] += 1
-                continue
+                if action == "skip":
+                    print_result(img_path.name, len(keywords), success=True, skipped=True)
+                    stats["skipped"] += 1
+                    continue
 
-            if backup_path is not None:
-                stats["backed_up"] += 1
-                stats["backup_dir"] = str(backup_path.parent)
+                try:
+                    backup_path, changed = write_keywords(txt_path, keywords, action)
+                except OSError as exc:
+                    print_result(img_path.name, 0, success=False, reason=str(exc))
+                    stats["failed"] += 1
+                    continue
 
-            print_result(img_path.name, len(keywords), success=True)
-            stats["processed"] += 1
-            stats["keywords"] += len(keywords)
+                if not changed:
+                    print_result(img_path.name, len(keywords), success=True, no_change=True)
+                    stats["no_change"] += 1
+                    continue
+
+                if backup_path is not None:
+                    stats["backed_up"] += 1
+                    stats["backup_dir"] = str(backup_path.parent)
+
+                print_result(img_path.name, len(keywords), success=True)
+                stats["processed"] += 1
+                stats["keywords"] += len(keywords)
 
     except KeyboardInterrupt:
-        sys.stdout.write("\n")
-        sys.stdout.flush()
-        print_warning("Interrupted by user.")
+        console.print()
+        console.print("[warning]![/] [warning]Interrupted by user.[/]")
 
-    elapsed = time.monotonic() - start_time
-    render_progress(total, total, "Complete", elapsed)
     print_summary(stats)
 
 
