@@ -3,6 +3,8 @@
 ## Overview
 Standardized terminal UI library, theme, and output patterns to reduce iteration cycles on console styling.
 
+**Note:** This spec covers **Rich** for simple CLI output. For interactive applications (forms, dashboards, multi-screen apps), use **Textual** — see [TEXTUAL_SPEC.md](TEXTUAL_SPEC.md).
+
 ---
 
 ## Library Selection
