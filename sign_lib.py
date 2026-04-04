@@ -56,21 +56,21 @@ def find_png_files(directory: str) -> list[pathlib.Path]:
 def _kw_relative_size(bbox_h: int, bbox_w: int, canvas_h: int, canvas_w: int) -> str:
     ratio = (bbox_h * bbox_w) / (canvas_h * canvas_w)
     if ratio < 0.10:
-        return "tiny-signature"
+        return "tiny"
     if ratio < 0.30:
-        return "small-signature"
+        return "small"
     if ratio < 0.60:
-        return "medium-signature"
-    return "large-signature"
+        return "medium"
+    return "large"
 
 
 def _kw_aspect_ratio(bbox_h: int, bbox_w: int) -> str:
     ratio = bbox_w / bbox_h if bbox_h > 0 else 1.0
     if ratio < 0.75:
-        return "tall-signature"
+        return "tall"
     if ratio < 1.33:
-        return "square-signature"
-    return "wide-signature"
+        return "square"
+    return "wide"
 
 
 def _kw_ink_density(binary_crop: np.ndarray) -> str:
