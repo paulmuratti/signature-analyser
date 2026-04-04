@@ -1,1 +1,1 @@
-large, wide, light-ink, thin-strokes, moderate-complexity, vertically-centered, full-height, upright-slant, mildly-fragmented, bold-strokes, moderate-pressure-variation
+signaturegen, handwritten signature, black ink, white background

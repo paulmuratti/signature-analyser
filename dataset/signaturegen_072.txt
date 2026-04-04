@@ -1,1 +1,1 @@
-medium, wide, sparse-ink, hairline-strokes, moderate-complexity, top-heavy, mid-height, upright-slant, highly-fragmented, intricate-strokes, uniform-pressure
+signaturegen, handwritten signature, black ink, white background
