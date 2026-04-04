@@ -33,13 +33,13 @@ except ImportError:
             return ""
     Fore = Style = _Noop()  # type: ignore[assignment]
 
-C_SUCCESS   = Fore.GREEN
-C_FAIL      = Fore.RED
-C_WARN      = Fore.YELLOW
-C_INFO      = Fore.CYAN
-C_PROGRESS  = Fore.BLUE
-C_HEADER    = Fore.MAGENTA
-C_NOCHANGE  = Fore.WHITE
+C_SUCCESS   = Style.BRIGHT + Fore.GREEN      # vivid green  — success / ok
+C_FAIL      = Style.BRIGHT + Fore.RED        # vivid red    — errors
+C_WARN      = Style.BRIGHT + Fore.YELLOW     # vivid yellow — warnings
+C_INFO      = Fore.CYAN                      # cyan         — labels / info (already bright)
+C_PROGRESS  = Style.BRIGHT + Fore.BLUE       # bright blue  — progress bar (plain blue is near-invisible on black)
+C_HEADER    = Style.BRIGHT + Fore.MAGENTA    # bright pink  — section headers (plain magenta reads as dark purple)
+C_NOCHANGE  = Fore.WHITE                     # white        — neutral / no-change
 C_RESET     = Style.RESET_ALL
 
 # ── Output helpers ────────────────────────────────────────────────────────────
