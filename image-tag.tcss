@@ -41,7 +41,7 @@ Button.wide-buttons {
 }
 
 #progress-container, #summary-container, #stop-hint-container {
-    border: solid $secondary;
+    border: round $secondary;
     margin: 1 4;
     padding: 1 2;
     height: auto;
@@ -90,8 +90,8 @@ Button.wide-buttons {
     width: 45%;
     text-style: bold;
     text-align: center;
-    color: $text-warning;
-    background: $warning-muted;
+    color: $text-accent;
+    background: $accent-muted;
     margin: 0;
 }
 
@@ -103,7 +103,7 @@ Button.wide-buttons {
 }
 
 #result-table {
-    border: solid $primary;
+    border: round $primary;
     margin: 1 4;
     width: 100%;
     height: 1fr;
@@ -117,7 +117,7 @@ Button.wide-buttons {
     text-style: bold;
     background: $primary-darken-1;
     color: $text;
-    border-bottom: solid $primary;
+    border-bottom: round $primary;
 }
 
 #result-table > .datatable--row {
@@ -125,7 +125,7 @@ Button.wide-buttons {
 }
 
 #result-table {
-    border-top: solid $primary;
+    border-top: round $primary;
 }
 
 #confirm-prompt {

@@ -798,6 +798,7 @@ class SignApp(App):
     """Main Textual application."""
 
     THEME = "gruvbox"
+    # THEME = "flexoki"
     TITLE = "Signature Image Analysis and Keyword Allocation"
 
     CSS_PATH = "image-tag.tcss"
