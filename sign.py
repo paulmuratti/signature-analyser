@@ -253,6 +253,17 @@ _CREATIVE_PROMPT = (
 )
 
 
+_rate_limit_buffer: float = 0.0
+_RATE_LIMIT_BUFFER_STEP: float = 0.5
+_RATE_LIMIT_BUFFER_CAP: float = 5.0
+
+
+def reset_rate_limit_buffer() -> None:
+    """Reset the adaptive rate limit buffer. Call at the start of each run."""
+    global _rate_limit_buffer
+    _rate_limit_buffer = 0.0
+
+
 def _parse_retry_after(exc: Exception) -> float:
     """Extract the API-suggested wait time in seconds from a rate limit error."""
     response = getattr(exc, "response", None)
@@ -327,9 +338,14 @@ def _call_vision_api(image_path: pathlib.Path, provider: str, client: Any,
                 or getattr(exc, "status_code", None) == 429
             )
             if attempt == 0 and is_rate_limit:
-                wait = _parse_retry_after(exc) + 1.0
-                logger.warning("Rate limit hit for %s, waiting %.2fs: %s",
-                               image_path.name, wait, exc)
+                global _rate_limit_buffer
+                _rate_limit_buffer = min(
+                    _rate_limit_buffer + _RATE_LIMIT_BUFFER_STEP,
+                    _RATE_LIMIT_BUFFER_CAP,
+                )
+                wait = _parse_retry_after(exc) + 1.0 + _rate_limit_buffer
+                logger.warning("Rate limit hit for %s, waiting %.2fs (buffer=%.1fs): %s",
+                               image_path.name, wait, _rate_limit_buffer, exc)
                 if status_fn:
                     status_fn(f"Rate limited — waiting {wait:.1f}s (press Stop to cancel)")
                 time.sleep(wait)

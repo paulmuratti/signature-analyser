@@ -73,6 +73,7 @@ try:
         find_png_files,
         init_ai_client,
         parse_args,
+        reset_rate_limit_buffer,
         write_keywords,
     )
 
@@ -447,6 +448,7 @@ class MainScreen(Screen):
                 "backed_up": 0,
                 "backup_dir": None,
             }
+            reset_rate_limit_buffer()
             self._run_worker()
         except Exception as e:
             logger.exception("Error starting worker")
