@@ -287,7 +287,7 @@ class MainScreen(Screen):
         )
         yield DataTable(id="result-table", cursor_type="none")
         yield Vertical(
-            Static("Press Ctrl+S to Stop Processing", id="stop-hint"),
+            Static("Press Ctrl+S to Stop Processing", id="stop-hint", classes="active"),
             id="stop-hint-container",
         )
         yield Vertical(Static(id="summary-panel"), id="summary-container")
@@ -298,7 +298,11 @@ class MainScreen(Screen):
 
     def action_stop_processing(self) -> None:
         self._stop_requested = True
+        self.query_one("#stop-hint", Static).classes = "stopping"   
         self.query_one("#stop-hint", Static).update("Stopping after current image…")
+        
+        # classes.update("stopping")
+
         logger.info("Graceful stop requested by user")
 
     def on_mount(self) -> None:

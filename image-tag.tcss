@@ -76,7 +76,7 @@ Button.wide-buttons {
     border: round $error;
 }
 
-#stop-hint {
+#stop-hint.active {
     width: 45%;
     text-style: bold;
     text-align: center;
@@ -84,6 +84,17 @@ Button.wide-buttons {
     background: $error-muted;
     margin: 0;
 }
+
+
+#stop-hint.stopping  {
+    width: 45%;
+    text-style: bold;
+    text-align: center;
+    color: $text-warning;
+    background: $warning-muted;
+    margin: 0;
+}
+
 
 .current-file {
     color: $text-muted;
@@ -98,6 +109,10 @@ Button.wide-buttons {
     height: 1fr;
 }
 
+#result-table > .datatable--header, #result-table > .datatable--row {
+    text-style: none;
+}
+
 #result-table > .datatable--header {
     text-style: bold;
     background: $primary-darken-1;
@@ -107,11 +122,6 @@ Button.wide-buttons {
 
 #result-table > .datatable--row {
     text-style: none;
-}
-
-#result-table.cellFAIL {
-    background: $error-muted;
-    color: $text-error;
 }
 
 #result-table {
@@ -168,24 +178,4 @@ ConflictModal {
     margin: 1 0 1 0;
     content-align: center middle;
     width: 100%;
-}
-
-.cellDONE {
-    background: $success-muted;
-    color: $text-success;
-}
-
-.cellFAIL {
-    background: $error-muted;
-    color: $text-error;
-}
-
-.cellSAME {
-    background: $success-muted;
-    color: $text-accent;
-}   
-
-.cellSKIP {
-    background: $warning-muted;
-    color: $text-warning;
 }

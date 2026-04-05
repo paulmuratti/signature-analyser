@@ -1,1 +1,1 @@
-signaturegen, handwritten signature, black ink, white background
+large, square, sparse-ink, thin-strokes, few-components, vertically-centered, full-height, upright-slant, well-connected, bold-strokes, uniform-pressure
