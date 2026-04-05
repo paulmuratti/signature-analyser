@@ -610,6 +610,14 @@ class MainScreen(Screen):
         thread.start()
         logger.info("Worker thread started")
 
+    # Consecutive failure ceiling
+    # ----------------------------
+    # Tracks failures that occur back-to-back during a run. Resets to 0 on any
+    # successful file (success, no_change, or skip). Both analysis failures and
+    # write failures count toward the streak. Rate limit retries that ultimately
+    # succeed do not count. When the ceiling is hit, WorkerAborted is posted,
+    # an error modal is shown, and the run halts — a strong signal that something
+    # systemic is wrong (e.g. revoked API key, network down).
     _CONSECUTIVE_FAILURE_LIMIT = 5
 
     def _worker_analysis(self) -> None:

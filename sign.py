@@ -253,6 +253,13 @@ _CREATIVE_PROMPT = (
 )
 
 
+# Adaptive rate limit buffer
+# ----------------------------
+# Each rate limit hit adds _RATE_LIMIT_BUFFER_STEP seconds to the wait on top
+# of the API-advised retry time and the fixed 1s UX buffer. This accounts for
+# the observed pattern where rate limits become more frequent as the token
+# window fills up over a long batch. The buffer is capped at _RATE_LIMIT_BUFFER_CAP
+# to prevent waits from spiralling, and resets to 0 at the start of each run.
 _rate_limit_buffer: float = 0.0
 _RATE_LIMIT_BUFFER_STEP: float = 0.5
 _RATE_LIMIT_BUFFER_CAP: float = 5.0
