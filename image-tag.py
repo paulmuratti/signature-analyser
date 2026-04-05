@@ -15,6 +15,7 @@ import threading
 from typing import Any
 
 from dotenv import load_dotenv
+from rich import color
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, Container
@@ -57,6 +58,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+logging.getLogger("sign").setLevel(logging.INFO)
 
 logger.info("=" * 70)
 logger.info(f"Starting Signature Analyser TUI v{__version__}")
@@ -85,6 +87,15 @@ except Exception as e:
 
 
 # ── Messages ──────────────────────────────────────────────────────────────────
+
+class ProgressStatus(Message):
+    """Short phase update from the worker for display under the progress bar."""
+
+    def __init__(self, filename: str, phase: str) -> None:
+        super().__init__()
+        self.filename = filename
+        self.phase = phase
+
 
 class FileStarted(Message):
     """Worker has begun processing a file."""
@@ -229,6 +240,7 @@ class MainScreen(Screen):
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit"),
         Binding("q", "quit", "Quit"),
+        Binding("ctrl+s", "stop_processing", "Stop after current", show=False),
     ]
 
     def compose(self) -> ComposeResult:
@@ -265,15 +277,26 @@ class MainScreen(Screen):
             id="progress-container",
         )
         yield DataTable(id="result-table", cursor_type="none")
+        yield Vertical(
+            Static("Press Ctrl+S to Stop Processing", id="stop-hint"),
+            id="stop-hint-container",
+        )
         yield Vertical(Static(id="summary-panel"), id="summary-container")
         yield Footer()
 
     _awaiting_confirm: bool = False
+    _stop_requested: bool = False
+
+    def action_stop_processing(self) -> None:
+        self._stop_requested = True
+        self.query_one("#stop-hint", Static).update("Stopping after current image…")
+        logger.info("Graceful stop requested by user")
 
     def on_mount(self) -> None:
         # self.query_one("#confirm-prompt", Static).styles.display = "none"
         self.query_one("#progress-container").styles.display = "none"
         self.query_one("#result-table", DataTable).styles.display = "none"
+        self.query_one("#stop-hint-container").styles.display = "none"
         self.query_one("#summary-container").styles.display = "none"
         # self.query_one("#global-action", Static).styles.display = "none"
         self.query_one("#method-container", None).styles.height = "auto"
@@ -389,6 +412,11 @@ class MainScreen(Screen):
             self.app.args.style = "style" in selected
             self.app.args.creative = "creative" in selected
 
+            logger.info(
+                "Analysis starting: cv=%s style=%s creative=%s",
+                self.app.args.cv, self.app.args.style, self.app.args.creative,
+            )
+
             # Re-init AI client if needed and not already done
             if (self.app.args.style or self.app.args.creative) and self.app.provider == "none":
                 try:
@@ -408,6 +436,7 @@ class MainScreen(Screen):
             table.add_column("Count", key="keywords", width=5)
             table.add_column("Keywords", key="words")
             table.styles.display = "block"
+            self.query_one("#stop-hint-container").styles.display = "block"
             self.app.stats = {
                 "total": len(self.app.png_files),
                 "processed": 0,
@@ -461,6 +490,15 @@ class MainScreen(Screen):
         except Exception as e:
             logger.exception(f"Error updating UI for file start: {e}")
 
+    def on_progress_status(self, message: ProgressStatus) -> None:
+        """Update the progress line with the current analysis phase."""
+        try:
+            self.query_one("#current-file", Static).update(
+                f"{message.filename}  ·  {message.phase}…"
+            )
+        except Exception:
+            logger.exception("Error updating progress status")
+
     def on_file_result(self, message: FileResult) -> None:
         """Process a file result and update stats."""
         try:
@@ -468,24 +506,25 @@ class MainScreen(Screen):
             status = message.status
             kw = message.keyword_count
 
+            v = self.app.get_css_variables()
             if status == "success":
-                style, result_label = "green", "✓  SUCCESS"
+                style, result_label = v.get("success", "#4EBF71"), "DONE"
             elif status == "skipped":
-                style, result_label = "yellow", "SKIPPED"
+                style, result_label = v.get("accent", "#4B9CD3"), "SKIP"
             elif status == "no_change":
-                style, result_label = "dim", "NO CHANGE"
+                style, result_label = v.get("warning", "#ADFF2F"), "SAME"
             else:
                 reason = f": {message.reason[:30]}" if message.reason else ""
-                style, result_label = "red", f"✗  FAILED{reason}"
+                style, result_label = v.get("error", "#FF4444"), "FAIL"
 
             kw_str = ", ".join(message.keywords) if message.keywords else "—"
             # if len(kw_str) > 67:
             #     kw_str = kw_str[:67] + "…"
             table.add_row(
-                Text(message.filename, style=style),
+                Text(message.filename),
                 Text(result_label, style=style, justify="center"),
-                Text(str(kw) if kw else "—", style=style, justify="right"),
-                Text(kw_str, style=style),
+                Text(str(kw) if kw else "—", justify="right"),
+                Text(kw_str),
             )
 
             # Update stats
@@ -529,6 +568,7 @@ class MainScreen(Screen):
             )
             self.query_one("#summary-panel", Static).update(self._format_summary())
             self.query_one("#summary-container").styles.display = "block"
+            self.query_one("#stop-hint-container").styles.display = "none"
             logger.info("Analysis complete")
         except Exception as e:
             logger.exception("Error displaying completion summary")
@@ -558,42 +598,25 @@ class MainScreen(Screen):
 
         try:
             for idx, img_path in enumerate(app.png_files):
+                if self._stop_requested:
+                    logger.info("Graceful stop: halting before %s", img_path.name)
+                    break
                 try:
-                    # Post progress update
-                    app.call_from_thread(
-                        self.post_message,
-                        FileStarted(img_path.name),
-                    )
+                    txt_path = img_path.with_suffix(".txt")
 
-                    # Analyse signature
-                    try:
-                        keywords = analyse_signature(
-                            img_path,
-                            app.provider,
-                            app.client,
-                            cv=app.args.cv,
-                            style=app.args.style,
-                            creative=app.args.creative,
-                        )
-                    except Exception as exc:
-                        logger.exception(f"Analysis failed for {img_path.name}: {exc}")
+                    # Resolve conflict before analysis so we don't make API
+                    # calls for files that will be skipped or cancelled
+                    if txt_path.exists() and app.global_action is None:
                         app.call_from_thread(
                             self.post_message,
-                            FileResult(img_path.name, 0, "failed", str(exc)),
+                            ProgressStatus(img_path.name, "Awaiting Conflict Resolution Response"),
                         )
-                        continue
-
-                    # Resolve conflict
-                    txt_path = img_path.with_suffix(".txt")
-                    if txt_path.exists() and app.global_action is None:
-                        # Clear event, push modal, wait
                         app._conflict_event.clear()
                         app.call_from_thread(
                             app.push_screen,
                             ConflictModal(txt_path.name),
                             self._on_conflict_resolved,
                         )
-                        # Wait for modal resolution (with timeout to prevent hanging)
                         if not app._conflict_event.wait(timeout=60):
                             logger.warning("Conflict resolution timeout")
                             app._conflict_result = "cancel"
@@ -605,16 +628,45 @@ class MainScreen(Screen):
 
                     if action == "cancel":
                         logger.info("User cancelled analysis")
-                        app.call_from_thread(
-                            self.post_message,
-                            WorkerCancelled(),
-                        )
+                        app.call_from_thread(self.post_message, WorkerCancelled())
                         return
 
                     if action == "skip":
+                        logger.info("Skipping %s", img_path.name)
                         app.call_from_thread(
                             self.post_message,
-                            FileResult(img_path.name, len(keywords), "skipped", keywords=keywords),
+                            FileResult(img_path.name, 0, "skipped"),
+                        )
+                        continue
+
+                    # Post progress update
+                    app.call_from_thread(
+                        self.post_message,
+                        FileStarted(img_path.name),
+                    )
+
+                    # Analyse signature
+                    def _post_status(phase: str, _name: str = img_path.name) -> None:
+                        app.call_from_thread(
+                            self.post_message,
+                            ProgressStatus(_name, phase),
+                        )
+
+                    try:
+                        keywords = analyse_signature(
+                            img_path,
+                            app.provider,
+                            app.client,
+                            cv=app.args.cv,
+                            style=app.args.style,
+                            creative=app.args.creative,
+                            status_fn=_post_status,
+                        )
+                    except Exception as exc:
+                        logger.exception(f"Analysis failed for {img_path.name}: {exc}")
+                        app.call_from_thread(
+                            self.post_message,
+                            FileResult(img_path.name, 0, "failed", str(exc)),
                         )
                         continue
 

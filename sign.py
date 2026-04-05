@@ -10,12 +10,16 @@ __version__ = "1.0.0"
 
 import argparse
 import base64
+import logging
 import os
 import pathlib
+import re
 import shutil
 import sys
 import time
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 from dotenv import load_dotenv
@@ -249,19 +253,44 @@ _CREATIVE_PROMPT = (
 )
 
 
+def _parse_retry_after(exc: Exception) -> float:
+    """Extract the API-suggested wait time in seconds from a rate limit error."""
+    response = getattr(exc, "response", None)
+    if response is not None:
+        headers = getattr(response, "headers", {})
+        for header in ("retry-after", "x-ratelimit-reset-requests"):
+            value = headers.get(header)
+            if value:
+                try:
+                    return float(value)
+                except ValueError:
+                    pass
+    m = re.search(r"try again in (\d+(?:\.\d+)?)(ms|s)", str(exc), re.IGNORECASE)
+    if m:
+        value = float(m.group(1))
+        return value / 1000 if m.group(2).lower() == "ms" else value
+    return 1.0
+
+
 def _call_vision_api(image_path: pathlib.Path, provider: str, client: Any,
-                     prompt: str) -> list[str]:
-    """Send image + prompt to the configured vision API; return keyword list."""
+                     prompt: str, *, status_fn: Any = None) -> list[str]:
+    """Send image + prompt to the configured vision API; return keyword list.
+
+    Raises RuntimeError on failure so the caller can mark the file as failed.
+    """
     if provider == "none" or client is None:
         return []
 
     img_data = base64.standard_b64encode(image_path.read_bytes()).decode()
 
     for attempt in range(2):
+        model = "claude-haiku-4-5-20251001" if provider == "anthropic" else "gpt-4o-mini"
+        logger.info("API call: provider=%s model=%s file=%s attempt=%d",
+                    provider, model, image_path.name, attempt + 1)
         try:
             if provider == "anthropic":
                 response = client.messages.create(
-                    model="claude-haiku-4-5-20251001",
+                    model=model,
                     max_tokens=150,
                     messages=[{"role": "user", "content": [
                         {"type": "image", "source": {
@@ -275,7 +304,7 @@ def _call_vision_api(image_path: pathlib.Path, provider: str, client: Any,
                 raw = response.content[0].text
             elif provider == "openai":
                 response = client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model=model,
                     max_tokens=150,
                     messages=[{"role": "user", "content": [
                         {"type": "image_url", "image_url": {
@@ -288,36 +317,51 @@ def _call_vision_api(image_path: pathlib.Path, provider: str, client: Any,
             else:
                 return []
 
-            return [kw.strip().lower() for kw in raw.split(",") if kw.strip()]
+            keywords = [kw.strip().lower() for kw in raw.split(",") if kw.strip()]
+            logger.info("API response: file=%s keywords=%d", image_path.name, len(keywords))
+            return keywords
 
         except Exception as exc:
-            if attempt == 0 and "rate" in str(exc).lower():
-                time.sleep(1)
+            is_rate_limit = (
+                "rate" in str(exc).lower()
+                or getattr(exc, "status_code", None) == 429
+            )
+            if attempt == 0 and is_rate_limit:
+                wait = _parse_retry_after(exc) + 1.0
+                logger.warning("Rate limit hit for %s, waiting %.2fs: %s",
+                               image_path.name, wait, exc)
+                if status_fn:
+                    status_fn(f"Rate limited — waiting {wait:.1f}s (press Stop to cancel)")
+                time.sleep(wait)
                 continue
-            console.print(f"[warning]![/] [warning]AI inference failed for {image_path.name}: {exc}[/]")
-            return []
+            logger.error("API call failed for %s: %s", image_path.name, exc)
+            raise RuntimeError(f"API call failed: {exc}") from exc
 
-    return []
+    raise RuntimeError("API call failed after retry")
 
 
-def _analyse_ai(image_path: pathlib.Path, provider: str, client: Any) -> list[str]:
+def _analyse_ai(image_path: pathlib.Path, provider: str, client: Any,
+                *, status_fn: Any = None) -> list[str]:
     """Query vision AI for visual-style keyword descriptors."""
-    return _call_vision_api(image_path, provider, client, _AI_PROMPT)
+    return _call_vision_api(image_path, provider, client, _AI_PROMPT, status_fn=status_fn)
 
 
-def _analyse_creative(image_path: pathlib.Path, provider: str, client: Any) -> list[str]:
+def _analyse_creative(image_path: pathlib.Path, provider: str, client: Any,
+                      *, status_fn: Any = None) -> list[str]:
     """Query vision AI for broad personality and sex-attribute inferences."""
-    return _call_vision_api(image_path, provider, client, _CREATIVE_PROMPT)
+    return _call_vision_api(image_path, provider, client, _CREATIVE_PROMPT, status_fn=status_fn)
 
 # ── Top-level analyser ────────────────────────────────────────────────────────
 
 def analyse_signature(image_path: pathlib.Path, provider: str, client: Any,
                       *, cv: bool = True, style: bool = False,
-                      creative: bool = False) -> list[str]:
+                      creative: bool = False,
+                      status_fn: Any = None) -> list[str]:
     """Return combined keyword list for a signature image.
 
     CV analysis runs only when cv=True.  AI requests are only made when the
     corresponding flag is True and a client is available.
+    status_fn, if provided, is called with a short string before each phase.
     """
     try:
         img = Image.open(image_path).convert("L")
@@ -337,13 +381,19 @@ def analyse_signature(image_path: pathlib.Path, provider: str, client: Any,
     keywords: list[str] = []
 
     if cv:
+        if status_fn:
+            status_fn("CV Analysis")
         keywords += _analyse_cv(binary, canvas_h, canvas_w)
 
     if style:
-        keywords += _analyse_ai(image_path, provider, client)
+        if status_fn:
+            status_fn("Style API query")
+        keywords += _analyse_ai(image_path, provider, client, status_fn=status_fn)
 
     if creative:
-        keywords += _analyse_creative(image_path, provider, client)
+        if status_fn:
+            status_fn("Creative API query")
+        keywords += _analyse_creative(image_path, provider, client, status_fn=status_fn)
 
     return keywords
 
