@@ -440,9 +440,9 @@ class MainScreen(Screen):
             progress.update(total=len(self.app.png_files))
             self.query_one("#progress-container").styles.display = "block"
             table = self.query_one("#result-table", DataTable)
-            table.add_column("File", key="file", width=25)
-            table.add_column("Result", key="result", width=8),
-            table.add_column("Count", key="keywords", width=5)
+            table.add_column("File", key="file")
+            table.add_column("Result", key="result", width=6),
+            table.add_column("Count", key="keywords", width=6)
             table.add_column("Keywords", key="words")
             table.styles.display = "block"
             self.query_one("#stop-hint-container").styles.display = "block"
@@ -515,8 +515,10 @@ class MainScreen(Screen):
             table = self.query_one("#result-table", DataTable)
             status = message.status
             kw = message.keyword_count
-
+          
             v = self.app.get_css_variables()
+            normal = v.get("text-secondary", "#4EBF71")
+            italic = v.get("text-secondary", "#4EBF71") + " italic"
             if status == "success":
                 style, result_label = v.get("success", "#4EBF71"), "DONE"
             elif status == "skipped":
@@ -531,10 +533,10 @@ class MainScreen(Screen):
             # if len(kw_str) > 67:
             #     kw_str = kw_str[:67] + "…"
             table.add_row(
-                Text(message.filename),
+                Text(message.filename, style=normal),
                 Text(result_label, style=style, justify="center"),
-                Text(str(kw) if kw else "—", justify="right"),
-                Text(kw_str, style="italic"),
+                Text(str(kw) if kw else "—", justify="center"),
+                Text(kw_str, style=italic),
             )
 
             # Update stats

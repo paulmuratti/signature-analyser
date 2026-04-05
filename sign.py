@@ -262,7 +262,7 @@ _CREATIVE_PROMPT = (
 # to prevent waits from spiralling, and resets to 0 at the start of each run.
 _rate_limit_buffer: float = 0.0
 _RATE_LIMIT_BUFFER_STEP: float = 0.5
-_RATE_LIMIT_BUFFER_CAP: float = 5.0
+_RATE_LIMIT_BUFFER_CAP: float = 15.0
 
 
 def reset_rate_limit_buffer() -> None:
