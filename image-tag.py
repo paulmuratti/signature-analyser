@@ -534,7 +534,7 @@ class MainScreen(Screen):
                 Text(message.filename),
                 Text(result_label, style=style, justify="center"),
                 Text(str(kw) if kw else "—", justify="right"),
-                Text(kw_str),
+                Text(kw_str, style="italic"),
             )
 
             # Update stats
@@ -663,9 +663,22 @@ class MainScreen(Screen):
 
                     if action == "skip":
                         logger.info("Skipping %s", img_path.name)
+                        existing_keywords = []
+                        try:
+                            existing_keywords = [
+                                kw.strip() for kw in txt_path.read_text().split(",")
+                                if kw.strip()
+                            ]
+                        except Exception:
+                            logger.warning("Could not read existing keywords from %s", txt_path)
                         app.call_from_thread(
                             self.post_message,
-                            FileResult(img_path.name, 0, "skipped"),
+                            FileResult(
+                                img_path.name,
+                                len(existing_keywords),
+                                "skipped",
+                                keywords=existing_keywords,
+                            ),
                         )
                         continue
 
@@ -732,6 +745,14 @@ class MainScreen(Screen):
                         continue
 
                     consecutive_failures = 0
+                    if not changed:
+                        try:
+                            keywords = [
+                                kw.strip() for kw in txt_path.read_text().split(",")
+                                if kw.strip()
+                            ]
+                        except Exception:
+                            logger.warning("Could not read existing keywords from %s", txt_path)
                     status = "no_change" if not changed else "success"
                     app.call_from_thread(
                         self.post_message,
