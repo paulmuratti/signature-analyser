@@ -40,7 +40,7 @@ Button.wide-buttons {
     height: auto;
 }
 
-#progress-container, #summary-container {
+#progress-container, #summary-container, #stop-hint-container {
     border: solid $secondary;
     margin: 1 4;
     padding: 1 2;
@@ -71,6 +71,20 @@ Button.wide-buttons {
     /* height: 3; */
 }
 
+#stop-hint-container {
+    background: $surface;
+    border: round $error;
+}
+
+#stop-hint {
+    width: 45%;
+    text-style: bold;
+    text-align: center;
+    color: $text-error;
+    background: $error-muted;
+    margin: 0;
+}
+
 .current-file {
     color: $text-muted;
     width: 100%;
@@ -89,6 +103,19 @@ Button.wide-buttons {
     background: $primary-darken-1;
     color: $text;
     border-bottom: solid $primary;
+}
+
+#result-table > .datatable--row {
+    text-style: none;
+}
+
+#result-table.cellFAIL {
+    background: $error-muted;
+    color: $text-error;
+}
+
+#result-table {
+    border-top: solid $primary;
 }
 
 #confirm-prompt {
@@ -141,4 +168,24 @@ ConflictModal {
     margin: 1 0 1 0;
     content-align: center middle;
     width: 100%;
+}
+
+.cellDONE {
+    background: $success-muted;
+    color: $text-success;
+}
+
+.cellFAIL {
+    background: $error-muted;
+    color: $text-error;
+}
+
+.cellSAME {
+    background: $success-muted;
+    color: $text-accent;
+}   
+
+.cellSKIP {
+    background: $warning-muted;
+    color: $text-warning;
 }
