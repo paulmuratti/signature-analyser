@@ -1,0 +1,144 @@
+Screen > Widget {
+    width: 100%;
+    align: center top;
+}
+
+SelectionList {
+    border: round $accent;
+    height: auto;
+    width: 100%;
+    margin: 1 4;
+    padding: 1 2;
+ }
+
+Button.wide-buttons {
+    align-horizontal: center;
+    height: auto;
+    padding: 0 5;
+    /* dock: bottom; */
+}
+
+.button-panel {
+    align-horizontal: center;
+    
+    /* width: 100%; */
+    height: auto;
+    /* dock: bottom; */
+    content-align: center middle;
+}
+
+.method-header {
+    border: round $accent;
+    background: $accent-muted;
+    color: $text-accent;
+    align-horizontal: center;
+    padding: 0 0;
+    content-align-horizontal: center;
+    /* padding: 1 2; */
+    margin: 1 4;
+    width: 100%;
+    height: auto;
+}
+
+#progress-container, #summary-container {
+    border: solid $secondary;
+    margin: 1 4;
+    padding: 1 2;
+    height: auto;
+    width: 100%;
+}
+
+#results-title {
+    text-style: bold;
+    background: $accent-muted;
+    color: $text-accent;
+    border: round $accent;
+    width: 100%;
+    height: auto;
+    content-align: center middle;
+    text-align: center;
+    padding: 0 1;
+    margin: 0 0 1 0;
+}
+
+#progress-container ProgressBar {
+    width: 1fr;
+    /* height: 3; */
+}
+
+#progress-container ProgressBar Bar {
+    width: 1fr;
+    /* height: 3; */
+}
+
+.current-file {
+    color: $text-muted;
+    width: 100%;
+    /* padding: 0 0 ;  */
+}
+
+#result-table {
+    border: solid $primary;
+    margin: 1 4;
+    width: 100%;
+    height: 1fr;
+}
+
+#result-table > .datatable--header {
+    text-style: bold;
+    background: $primary-darken-1;
+    color: $text;
+    border-bottom: solid $primary;
+}
+
+#confirm-prompt {
+    color: $accent;
+}
+
+ConflictModal {
+    align: center middle;
+}
+
+#conflict-container {
+    border: round $secondary;
+    background: $background;
+    width: 72;
+    height: auto;
+    padding: 0 1 1 1;
+}
+
+#conflict-container Button {
+    min-width: 12;
+    padding: 0 2;
+    margin: 0 2;
+}
+
+#conflict-container .button-panel {
+    margin: 0 2;
+}
+
+.modal-header {
+    border: round $text-accent;
+    background: $accent-muted;
+    color: $text-accent;
+    content-align: center middle;
+    text-align: center;
+    width: 100%;
+    height: auto;
+    margin: 0 0 1 0;
+    padding: 0 1;
+}
+
+.modal-message {
+    text-align: center;
+    content-align: center middle;
+    width: 100%;
+    height: auto;
+    margin: 0 0 1 0;
+}
+
+#conflict-container Checkbox {
+    margin: 1 0 1 0;
+    content-align: center middle;
+    width: 100%;
+}

@@ -56,21 +56,21 @@ def find_png_files(directory: str) -> list[pathlib.Path]:
 def _kw_relative_size(bbox_h: int, bbox_w: int, canvas_h: int, canvas_w: int) -> str:
     ratio = (bbox_h * bbox_w) / (canvas_h * canvas_w)
     if ratio < 0.10:
-        return "tiny-signature"
+        return "tiny"
     if ratio < 0.30:
-        return "small-signature"
+        return "small"
     if ratio < 0.60:
-        return "medium-signature"
-    return "large-signature"
+        return "medium"
+    return "large"
 
 
 def _kw_aspect_ratio(bbox_h: int, bbox_w: int) -> str:
     ratio = bbox_w / bbox_h if bbox_h > 0 else 1.0
     if ratio < 0.75:
-        return "tall-signature"
+        return "tall"
     if ratio < 1.33:
-        return "square-signature"
-    return "wide-signature"
+        return "square"
+    return "wide"
 
 
 def _kw_ink_density(binary_crop: np.ndarray) -> str:
@@ -312,10 +312,11 @@ def _analyse_creative(image_path: pathlib.Path, provider: str, client: Any) -> l
 # ── Top-level analyser ────────────────────────────────────────────────────────
 
 def analyse_signature(image_path: pathlib.Path, provider: str, client: Any,
-                      *, style: bool = False, creative: bool = False) -> list[str]:
+                      *, cv: bool = True, style: bool = False,
+                      creative: bool = False) -> list[str]:
     """Return combined keyword list for a signature image.
 
-    CV analysis always runs.  AI requests are only made when the
+    CV analysis runs only when cv=True.  AI requests are only made when the
     corresponding flag is True and a client is available.
     """
     try:
@@ -333,7 +334,10 @@ def analyse_signature(image_path: pathlib.Path, provider: str, client: Any,
     if not binary.any():
         return ["blank-image"]
 
-    keywords = _analyse_cv(binary, canvas_h, canvas_w)
+    keywords: list[str] = []
+
+    if cv:
+        keywords += _analyse_cv(binary, canvas_h, canvas_w)
 
     if style:
         keywords += _analyse_ai(image_path, provider, client)
