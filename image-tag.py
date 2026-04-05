@@ -605,8 +605,13 @@ class MainScreen(Screen):
                     txt_path = img_path.with_suffix(".txt")
 
                     # Resolve conflict before analysis so we don't make API
-                    # calls for files that will be skipped or cancelled
-                    if txt_path.exists() and app.global_action is None:
+                    # calls for files that will be skipped or cancelled.
+                    # Global action only applies when a .txt already exists.
+                    if not txt_path.exists():
+                        action = "overwrite"
+                    elif app.global_action is not None:
+                        action = app.global_action
+                    else:
                         app.call_from_thread(
                             self.post_message,
                             ProgressStatus(img_path.name, "Awaiting Conflict Resolution Response"),
@@ -621,10 +626,6 @@ class MainScreen(Screen):
                             logger.warning("Conflict resolution timeout")
                             app._conflict_result = "cancel"
                         action = app._conflict_result
-                    elif app.global_action is not None:
-                        action = app.global_action
-                    else:
-                        action = "overwrite"
 
                     if action == "cancel":
                         logger.info("User cancelled analysis")
