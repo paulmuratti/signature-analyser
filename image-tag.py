@@ -139,6 +139,14 @@ class WorkerCancelled(Message):
     pass
 
 
+class WorkerAborted(Message):
+    """Worker halted due to too many consecutive failures."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__()
+        self.reason = reason
+
+
 class ErrorOccurred(Message):
     """An error occurred during processing."""
 
@@ -580,6 +588,14 @@ class MainScreen(Screen):
         logger.info("Analysis cancelled by user")
         self.app.exit()
 
+    def on_worker_aborted(self, message: WorkerAborted) -> None:
+        """Show error and exit when consecutive failure ceiling is hit."""
+        logger.error("Worker aborted: %s", message.reason)
+        self.app.push_screen(
+            ErrorModal("Processing Aborted", message.reason),
+            lambda _: self.app.exit(),
+        )
+
     def on_error_occurred(self, message: ErrorOccurred) -> None:
         """Display an error modal."""
         try:
@@ -594,9 +610,12 @@ class MainScreen(Screen):
         thread.start()
         logger.info("Worker thread started")
 
+    _CONSECUTIVE_FAILURE_LIMIT = 5
+
     def _worker_analysis(self) -> None:
         """Background worker: process all files."""
         app = self.app
+        consecutive_failures = 0
 
         try:
             for idx, img_path in enumerate(app.png_files):
@@ -671,6 +690,16 @@ class MainScreen(Screen):
                             self.post_message,
                             FileResult(img_path.name, 0, "failed", str(exc)),
                         )
+                        consecutive_failures += 1
+                        if consecutive_failures >= self._CONSECUTIVE_FAILURE_LIMIT:
+                            app.call_from_thread(
+                                self.post_message,
+                                WorkerAborted(
+                                    f"Stopped after {self._CONSECUTIVE_FAILURE_LIMIT} consecutive"
+                                    " failures — check your API key or logs."
+                                ),
+                            )
+                            return
                         continue
 
                     # Write keywords
@@ -682,8 +711,19 @@ class MainScreen(Screen):
                             self.post_message,
                             FileResult(img_path.name, 0, "failed", str(exc)),
                         )
+                        consecutive_failures += 1
+                        if consecutive_failures >= self._CONSECUTIVE_FAILURE_LIMIT:
+                            app.call_from_thread(
+                                self.post_message,
+                                WorkerAborted(
+                                    f"Stopped after {self._CONSECUTIVE_FAILURE_LIMIT} consecutive"
+                                    " failures — check your API key or logs."
+                                ),
+                            )
+                            return
                         continue
 
+                    consecutive_failures = 0
                     status = "no_change" if not changed else "success"
                     app.call_from_thread(
                         self.post_message,
